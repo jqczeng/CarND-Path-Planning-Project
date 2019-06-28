@@ -13,6 +13,104 @@
 using nlohmann::json;
 using std::string;
 using std::vector;
+using std::cout;
+using std::endl;
+
+string car_change_state(int next_lane, string car_state, double car_d) {
+
+    double goal_next_lane_lb = 2 + 4*next_lane - 2;
+    double goal_next_lane_rb = 2 + 4*next_lane + 2;
+
+    cout << "car_d: " << car_d << " goal_lane_lb: " << goal_next_lane_lb << " goal_lane_rb: " << goal_next_lane_rb << endl;
+    if (car_d > goal_next_lane_lb + 1 && car_d < goal_next_lane_rb - 1) {
+      cout << "Finished changing lane" << endl;
+      car_state = "KL";
+    } else if (car_state == "PL") {
+      cout << "car changing left" << endl;
+    } else if (car_state == "PR") {
+      cout << "car changing right" << endl;
+    }
+
+  return car_state;
+}
+
+bool detect_vehicles_on_lane(int next_lane, double car_s, vector<vector<double>> sensor_fusion, int prev_size) {
+  bool vehicles_detected = false; 
+  int buffer_dist_ahead = 30.0;
+  int buffer_dist_behind = 10.0;
+
+    // find ref_v to use
+  for (int i = 0; i < sensor_fusion.size(); i++) {
+    // car is in my lane 
+    float d = sensor_fusion[i][6];
+    
+    double vx = sensor_fusion[i][3];
+    double vy = sensor_fusion[i][4];
+    double check_car_s = sensor_fusion[i][5];
+    double check_speed = sqrt(vx*vx + vy*vy);
+
+    double next_lane_lb = 2 + 4*next_lane - 2;
+    double next_lane_rb = 2 + 4*next_lane + 2;
+
+    check_car_s += ((double) prev_size * 0.02 * check_speed);
+
+    // detect the vehicle in the next lane
+    if (d < next_lane_rb && d > next_lane_lb) {
+      if ((check_car_s  > car_s) && (abs(check_car_s - car_s) < buffer_dist_ahead)) {
+        cout << "Vehicle ahead with: " << abs(check_car_s - car_s) << " m dist" << endl;
+        vehicles_detected = true;
+        break;
+      } else if ((check_car_s < car_s) && (abs(check_car_s - car_s) < buffer_dist_behind)) {
+        cout << "Vehicle behind with: " << abs(check_car_s - car_s) << " m dist" << endl;
+        vehicles_detected = true;
+        break;
+      }
+    }
+  }
+
+  return vehicles_detected;
+}
+
+int lane_selection(int lane, double car_s, vector<vector<double>> sensor_fusion, int prev_size) {
+  
+  int goal_lane = lane;
+
+  cout << "too close and changing lanes!" << endl;
+
+  if (lane == 1) {
+    bool left_lane_full = detect_vehicles_on_lane(0, car_s, sensor_fusion, prev_size);
+    bool right_lane_full = detect_vehicles_on_lane(2, car_s, sensor_fusion, prev_size);
+
+    if (!left_lane_full && right_lane_full)
+    {
+      cout << "No cars on left, changing left" << endl;
+      goal_lane = 0;
+    } else if (left_lane_full && !right_lane_full) {
+      cout << "No cars on right, changing right" << endl;
+      goal_lane = 2;
+    }
+  }
+  else if (lane == 0) {
+    bool right_lane_full = detect_vehicles_on_lane(1, car_s, sensor_fusion, prev_size);
+
+    if (!right_lane_full) {
+      cout << "changing lane right" << endl;
+      goal_lane = 1;
+    }
+  }
+  else if (lane == 2) {
+    bool left_lane_full = detect_vehicles_on_lane(1, car_s, sensor_fusion, prev_size);
+
+    if (!left_lane_full) {
+      cout << "changing lane left" << endl;
+      goal_lane = 1;
+    }
+  }
+
+  return goal_lane;
+}
+
+
 
 int main() {
   uWS::Hub h;
@@ -32,6 +130,16 @@ int main() {
   std::ifstream in_map_(map_file_.c_str(), std::ifstream::in);
 
   string line;
+
+
+  int lane = 1; // starting lane
+
+  double ref_vel = 0.0; // mph
+
+  string car_state = "KL";
+
+  int next_lane;
+
   while (getline(in_map_, line)) {
     std::istringstream iss(line);
     double x;
@@ -51,11 +159,7 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  int lane = 1; // starting lane
-
-  double ref_vel = 0.0; // mph
-
-  h.onMessage([&ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
+  h.onMessage([&ref_vel, &lane, &car_state, &next_lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
@@ -95,17 +199,14 @@ int main() {
 
           int prev_size = previous_path_x.size();
 
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
-
           // Prediction of other cars 
           if (prev_size > 0) {
             car_s = end_path_s;
           }
 
           bool too_close = false;
+
+          cout << "Currently on lane: " << lane << " car_d: " << car_d << " car state: " << car_state << endl;
 
           // find ref_v to use
           for (int i = 0; i < sensor_fusion.size(); i++) {
@@ -114,13 +215,13 @@ int main() {
 
             float cur_lane_rbound = 2 + 4*lane + 2;
             float cur_lane_lbound = 2 + 4*lane - 2;
+            double check_car_s = sensor_fusion[i][5];
 
             if (d < cur_lane_rbound && d > cur_lane_lbound) {
               double vx = sensor_fusion[i][3];
               double vy = sensor_fusion[i][4];
               double check_speed = sqrt(vx*vx + vy*vy);
-              double check_car_s = sensor_fusion[i][5];
-
+              
               // predict the other car's current s value
               check_car_s += ((double) prev_size * 0.02 * check_speed);
 
@@ -128,15 +229,55 @@ int main() {
               if ((check_car_s > car_s) && ((check_car_s - car_s) < 30)) {
                 too_close = true;
               }
-            }
+            } 
           }
 
+          // // if too close to the car ahead, change lanes 
           if (too_close) {
-            ref_vel -= 0.224;
-          } else if (ref_vel < 49.5) {
+            if (car_state == "KL")
+            {
+              next_lane = lane_selection(lane, car_s, sensor_fusion, prev_size);
+              
+              // prepare change lane right
+              if (next_lane - lane > 0) {
+                car_state = "PLCR";
+              } 
+              // prepare change lane left
+              else if (next_lane - lane < 0) {
+                car_state = "PLCL";
+              } 
+              else {
+                ref_vel -= 0.224;
+              }
+            }
+          } else if (!too_close && ref_vel < 49.5) {
             ref_vel += 0.224;
           }
 
+          if (car_state == "PLCL") {
+              bool lane_full = detect_vehicles_on_lane(next_lane, car_s, sensor_fusion, prev_size);
+              if (!lane_full) {
+                cout << "lane: " << next_lane << " clear. Pass left" << endl;
+                lane = next_lane;
+                car_state = "PL";
+              } else {
+                car_state = "KL";
+              }
+          }
+          else if (car_state == "PLCR") {
+              bool lane_full = detect_vehicles_on_lane(next_lane, car_s, sensor_fusion, prev_size);
+              if (!lane_full) {
+                cout << "lane: " << next_lane << " clear. Pass right" << endl;
+                lane = next_lane;
+                car_state = "PR";
+              } else {
+                car_state = "KL";
+              }
+          }
+          else if (car_state == "PL" || car_state == "PR") {
+            cout << "passing to lane: " << lane << endl;
+            car_state = car_change_state(lane, car_state, car_d);
+          }
 
           // Trajectory 
           vector<double> ptsx; 
