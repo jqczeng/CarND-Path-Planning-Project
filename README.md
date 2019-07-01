@@ -1,16 +1,13 @@
+[state_machine]: ./pictures/state_machine.png "State Machine"
+[vehicle_detected_left]: ./pictures/vehicle_detected_left.png "Vehicle Detected Left"
+[change_lane_right]: ./pictures/change_lane_right.png "Lane Change Left"
+[change_lane_left]: ./pictures/change_lane_left.png "Lane Change Right"
+
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
-### Simulator.
-You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).  
-
-To run the simulator on Mac/Linux, first make the binary file executable with the following command:
-```shell
-sudo chmod u+x {simulator_file_name}
-```
 
 ### Goals
-In this project your goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. You will be provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
+The goal of this project is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. The car's localization and sensor fusion data will be provided along with a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
 
 #### The map of the highway is in data/highway_map.txt
 Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
@@ -43,13 +40,13 @@ Here is the data provided from the Simulator to the C++ Program
 #### Previous path data given to the Planner
 
 //Note: Return the previous list but with processed points removed, can be a nice tool to show how far along
-the path has processed since last time. 
+the path has processed since last time.
 
 ["previous_path_x"] The previous list of x points previously given to the simulator
 
 ["previous_path_y"] The previous list of y points previously given to the simulator
 
-#### Previous path's end s and d values 
+#### Previous path's end s and d values
 
 ["end_path_s"] The previous list's last point's frenet s value
 
@@ -57,7 +54,7 @@ the path has processed since last time.
 
 #### Sensor Fusion Data, a list of all other car's attributes on the same side of the road. (No Noise)
 
-["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates. 
+["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates.
 
 ## Details
 
@@ -68,6 +65,91 @@ the path has processed since last time.
 ## Tips
 
 A really helpful resource for doing this project and creating smooth trajectories was using http://kluge.in-chemnitz.de/opensource/spline/, the spline function is in a single hearder file is really easy to use.
+
+### Simulator.
+You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
+
+To run the simulator on Mac/Linux, first make the binary file executable with the following command:
+```shell
+sudo chmod u+x {simulator_file_name}
+```
+
+---
+
+# Implementation Details
+
+The following sections describe the implementation details of the project.
+
+## Lane Change Vehicle Detection
+
+Our car that travels along the highway will now be named Ego to avoid confusion when referring to other cars on the highway.
+
+When Ego is travelling along the highway, it will continuously monitor if there is another car that is slower in the same lane.
+
+If there is another car in the same lane and Ego is getting too close, Ego will see if there is a lane available for a lane change. The lanes next to Ego will be checked to see if there is a vehicle that's too close ahead of behind of Ego. The check is to make sure that it is meaningful for Ego to change to that lane. If there's a clear lane with vehicles at an acceptable distance ahead and behind Ego's current position, Ego will change to that lane. All of this logic will be captured by a finite state machine.
+
+An example of this can be seen in the image below where Ego is approaching the vehicle ahead on the lane. Ego is deciding to change lanes. However, Ego detects a car on the left hand side and no cars on the right lane. Ego will then lane change to the right lane.
+
+![alt text][vehicle_detected_left]
+
+## Finite State Machine
+A finite state machine was implemented to dictate vehicle behavior on the highway. A diagram of the of the finite state machine can be found below.
+
+There are a total of 5 states that will be discussed in the following sections.
+
+### 1. Keep lane
+
+The keep lane state will keep Ego in its current lane. It will monitor for the car speed and keep the car under the speed limit. If there is a car ahead, this state will strive to maintain a safe speed and distance away from the car. The finite state machine will then decide whether it is safe and feasible to pass the car ahead. The possible successive states are prepare for lane change left or prepare for lane change right.
+
+### 2. Prepare for lane change left
+
+When Ego needs to pass a vehicle on the left, it will transition to the prepare for lane change left state. This state will determine if it is safe to pass on the left lane. If there are cars ahead or behind on left lane, the finite state machine will check if it is at an appropriate distance away from Ego.  If it is no longer safe to pass on the right lane, the state will transition back to the keep lane state.
+
+### 3. Prepare for lane change right
+
+When Ego needs to pass a vehicle on the right, it will transition to the prepare for lane change right state. Similar to the prepare for lane change left state, this state will determine if it is safe to pass on the right lane. If there are cars ahead or behind on left lane, the finite state machine will check if it is at an appropriate distance away from Ego. If it is no longer safe to pass on the right lane, the state will transition back to the keep lane state.
+
+### 4. Lane change left
+
+This state will execute when it is determined that it is safe for Ego to pass on the left lane. Ego remains in this state until it has successfully lane changed. The lane change status is checked by monitoring Ego's frenet coordinate d until it reaches the goal lane's d boundaries. Once Ego has successfuly lane changed, Ego's state will return to the keep lane state.
+
+An image of Ego changing lanes to the left can be seen below:
+
+![alt text][change_lane_left]
+
+### 5. Lane change right
+
+Same as lane change left.
+
+An image of Ego changing lanes to the right can be seen below:
+![alt text][change_lane_right]
+
+## Path Planning
+
+The path planner determines how to execute the actions determined by the finite state machine. The planner creates the waypoints for Ego to follow the highway lane and to change lanes.
+
+### Lane Calculation
+Telemetry data is read in at 0.02 second intervals. The data contains the Frenet coordinate data of each car including Ego. Frenet coordinate data contains the s value which is the distance alone the lane of the highway and and the d value which is the the distance measured from the from the center line of the highway.
+
+Each highway lane is has a width of 4 meters. By knowing the desired car lane from the finite state machine, the required d value can be calculated.
+
+### Trajectory Calculation
+
+The trajectory planning is used to determine the next waypoints the car needs to follow.
+
+The next waypoints for Ego to follow can be determined by using the previous waypoints, Ego's current coordinates and the next three waypoints that are 30, 60 and 90 meters ahead. The waypoints are then converted into XY coordinates in order to be interpreted by the simulator.
+
+The waypoint coordinates are then connected by creating a spline. An external spline library is used to this.
+
+---
+
+## Future Features
+
+There are some additional features that should be implemented in the future to better Ego's performance. The additional features should be added are listed below:
+
+  1. When in the constant speed state, set Ego's speed to the car ahead's speed to maintain constant speed
+  2. Let Ego search for gaps between cars in other lanes to select better lane changing routes
+  3. Implement a cost function for Ego to decide which lane to take
 
 ---
 
@@ -87,7 +169,7 @@ A really helpful resource for doing this project and creating smooth trajectorie
   * Run either `install-mac.sh` or `install-ubuntu.sh`.
   * If you install from source, checkout to commit `e94b6e1`, i.e.
     ```
-    git clone https://github.com/uWebSockets/uWebSockets 
+    git clone https://github.com/uWebSockets/uWebSockets
     cd uWebSockets
     git checkout e94b6e1
     ```
@@ -139,7 +221,3 @@ that's just a guess.
 
 One last note here: regardless of the IDE used, every submitted project must
 still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
